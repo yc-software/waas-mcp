@@ -25,6 +25,7 @@ class WaasClient:
     def connect(self) -> bool:
         try:
             self.api_host = os.getenv("WAAS_API_HOST", "https://api.ycombinator.com")
+            self.host_header = os.getenv("WAAS_API_HOST_HEADER", "")
             self.access_token = os.getenv("WAAS_ACCESS_TOKEN", "")
             self.refresh_token = os.getenv("WAAS_REFRESH_TOKEN", "")
             self.client_id = os.getenv("WAAS_CLIENT_ID", "")
@@ -39,10 +40,13 @@ class WaasClient:
             return False
 
     def _headers(self) -> dict:
-        return {
+        headers = {
             "Authorization": f"Bearer {self.access_token}",
             "Content-Type": "application/json",
         }
+        if self.host_header:
+            headers["Host"] = self.host_header
+        return headers
 
     def _try_refresh(self) -> bool:
         if not self.refresh_token or not self.client_id:
