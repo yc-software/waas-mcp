@@ -2,7 +2,55 @@
 
 MCP server for the YC Work at a Startup (WAAS) API. Lets Claude Code list applicants, view candidate profiles, send messages, update pipeline state, and manage notes — all from the command line.
 
-## Install
+## Setup
+
+### Step 1: Create an OAuth Application
+
+Go to [account.ycombinator.com/oauth/applications/new](https://account.ycombinator.com/oauth/applications/new) and fill in:
+
+| Field | Value |
+|-------|-------|
+| **Name** | Whatever you want (e.g. `My Recruiting Bot`) |
+| **Redirect URI** | `urn:ietf:wg:oauth:2.0:oob` |
+| **Confidential** | **Unchecked** (important — non-confidential clients work with the token exchange; confidential ones don't due to secret hashing) |
+| **Scopes** | `candidates:read candidates:manage` |
+| **Grant flows** | `Authorization code` (check `Client credentials` too if you want) |
+
+Submit. Copy the **UID** from the confirmation page.
+
+### Step 2: Authorize
+
+Open this URL in your browser (replace `CLIENT_ID` with your UID):
+
+```
+https://account.ycombinator.com/oauth/authorize?client_id=CLIENT_ID&redirect_uri=urn:ietf:wg:oauth:2.0:oob&response_type=code&scope=candidates:read%20candidates:manage
+```
+
+Click **Authorize**. Copy the authorization code shown on screen.
+
+### Step 3: Exchange for Token
+
+```bash
+curl -X POST https://account.ycombinator.com/oauth/token \
+  -d "grant_type=authorization_code" \
+  -d "code=AUTH_CODE" \
+  -d "client_id=CLIENT_ID" \
+  -d "redirect_uri=urn:ietf:wg:oauth:2.0:oob"
+```
+
+No `client_secret` needed (non-confidential client). Returns:
+
+```json
+{
+  "access_token": "...",
+  "token_type": "Bearer",
+  "expires_in": 86400,
+  "refresh_token": "...",
+  "scope": "candidates:read candidates:manage"
+}
+```
+
+### Step 4: Install & Register
 
 ```bash
 # Install the MCP server
@@ -13,21 +61,34 @@ claude mcp add waas \
   -e WAAS_ACCESS_TOKEN=your_access_token \
   -e WAAS_REFRESH_TOKEN=your_refresh_token \
   -e WAAS_CLIENT_ID=your_client_id \
-  -e WAAS_CLIENT_SECRET=your_client_secret \
   -- uvx --from /path/to/mcp-yc-waas waas
 ```
 
-**Getting your OAuth token:**
-1. Create an OAuth application at `account.ycombinator.com/oauth/applications` with scopes `candidates:read candidates:manage` and grant flow `authorization_code`
-2. Authorize at: `https://account.ycombinator.com/oauth/authorize?client_id=CLIENT_ID&redirect_uri=urn:ietf:wg:oauth:2.0:oob&response_type=code&scope=candidates:read%20candidates:manage`
-3. Exchange the code for tokens:
-   ```bash
-   curl -X POST https://account.ycombinator.com/oauth/token \
-     -d "grant_type=authorization_code&code=AUTH_CODE&client_id=CLIENT_ID&client_secret=CLIENT_SECRET&redirect_uri=urn:ietf:wg:oauth:2.0:oob"
-   ```
-4. Use `access_token` and `refresh_token` from the response
+Restart Claude Code. The MCP server auto-refreshes expired tokens using the refresh token.
 
-The server auto-refreshes expired access tokens using the refresh token.
+### Local Development
+
+For testing against local bookface (`http://bookface.yclocal.com`), the API routes require a specific Host header. Use the shell script helper instead:
+
+```bash
+# Create the OAuth app at http://account.yclocal.com/oauth/applications/new
+# (same settings as above — non-confidential, candidates:read candidates:manage)
+
+# Authorize
+# http://account.yclocal.com/oauth/authorize?client_id=CLIENT_ID&redirect_uri=urn:ietf:wg:oauth:2.0:oob&response_type=code&scope=candidates:read%20candidates:manage
+
+# Exchange
+curl -X POST http://account.yclocal.com/oauth/token \
+  -d "grant_type=authorization_code" \
+  -d "code=AUTH_CODE" \
+  -d "client_id=CLIENT_ID" \
+  -d "redirect_uri=urn:ietf:wg:oauth:2.0:oob"
+
+# Test
+WAAS_API_HOST="http://bookface.yclocal.com" \
+WAAS_API_HOST_HEADER="public-api.yclocal.com:3002" \
+.claude/skills/waas-api/waas-api.sh /v1/applicants "needs_response=true&limit=3"
+```
 
 ## Configuration
 
@@ -36,8 +97,7 @@ The server auto-refreshes expired access tokens using the refresh token.
 | `WAAS_ACCESS_TOKEN` | Yes | — | OAuth2 access token |
 | `WAAS_REFRESH_TOKEN` | No | — | OAuth2 refresh token (for auto-refresh) |
 | `WAAS_CLIENT_ID` | No | — | OAuth2 client ID (needed for refresh) |
-| `WAAS_CLIENT_SECRET` | No | — | OAuth2 client secret (needed for refresh) |
-| `WAAS_API_HOST` | No | `https://api.ycombinator.com` | API host (for local dev) |
+| `WAAS_API_HOST` | No | `https://api.ycombinator.com` | API host |
 | `WAAS_TOKEN_HOST` | No | derived from API host | Token endpoint host (for refresh) |
 
 ## Tools
@@ -112,3 +172,11 @@ uv tool install --from . mcp-yc-waas
 uv tool install --force --from . mcp-yc-waas
 # Then restart Claude Code
 ```
+
+## Troubleshooting
+
+**"Client authentication failed"** — Make sure the OAuth app is set to **non-confidential**. Confidential apps hash secrets, making the token exchange fail.
+
+**Token expired** — Access tokens expire after 24 hours. If you have a refresh token and client ID configured, the server auto-refreshes. Otherwise, re-run steps 2-3.
+
+**Local dev 404** — The API routes require `Host: public-api.yclocal.com:3002`. Use the `waas-api.sh` shell script with `WAAS_API_HOST_HEADER` for local testing.
