@@ -117,7 +117,10 @@ TOOLS = [
             "List candidates who applied to your company's jobs on WAAS. "
             "Returns name, email, role, experience, location, work auth, positions, "
             "educations, applied_jobs, state, messaging timestamps. "
-            "Ordered by applied_at descending (newest first)."
+            "Ordered by applied_at descending (newest first). "
+            "Use compact=true for triage — returns ~60% smaller payloads by trimming "
+            "positions to top 2, educations to top 1, truncating looking_for, and "
+            "dropping fields not needed for first-pass scanning."
         ),
         inputSchema={
             "type": "object",
@@ -146,6 +149,10 @@ TOOLS = [
                 "offset": {
                     "type": "integer",
                     "description": "Offset for pagination (default 0).",
+                },
+                "compact": {
+                    "type": "boolean",
+                    "description": "Return slim payloads for triage. Trims positions to top 2, educations to top 1, truncates looking_for to 200 chars, drops email/remote/github_url/last_active_at/role_type. ~60% smaller.",
                 },
             },
         },
@@ -294,6 +301,53 @@ WRITE_TOOLS = {
 }
 
 
+def _compact_applicant(item: dict) -> dict:
+    """Trim an applicant item to triage-relevant fields only."""
+    c = item.get("candidate", {})
+    positions = c.get("positions", [])
+    educations = c.get("educations", [])
+    looking_for = c.get("looking_for") or ""
+    if len(looking_for) > 200:
+        looking_for = looking_for[:200] + "..."
+
+    return {
+        "candidate": {
+            "short_id": c.get("short_id"),
+            "name": c.get("name"),
+            "location": c.get("location"),
+            "role": c.get("role"),
+            "experience": c.get("experience"),
+            "us_authorized": c.get("us_authorized"),
+            "us_visa_sponsorship": c.get("us_visa_sponsorship"),
+            "short_phrase": c.get("short_phrase"),
+            "looking_for": looking_for,
+            "linkedin_url": c.get("linkedin_url"),
+            "profile_url": c.get("profile_url"),
+            "positions": [
+                {"title": p.get("title"), "company": p.get("company"), "current": p.get("is_current", False)}
+                for p in positions[:2]
+            ],
+            "educations": [
+                {"school": e.get("school"), "degree": e.get("degree"), "field": e.get("field_of_study")}
+                for e in educations[:1]
+            ],
+        },
+        "state": item.get("state"),
+        "applied_at": item.get("applied_at"),
+        "applied_jobs": item.get("applied_jobs"),
+        "company_messaged_at": item.get("company_messaged_at"),
+    }
+
+
+def _compact_response(response: dict) -> dict:
+    """Apply compact transformation to an applicant_list response."""
+    items = response.get("items", [])
+    return {
+        "items": [_compact_applicant(item) for item in items],
+        "next_cursor": response.get("next_cursor"),
+    }
+
+
 @server.list_tools()
 async def handle_list_tools() -> list[types.Tool]:
     return TOOLS
@@ -305,11 +359,13 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.T
     if name == "health_check":
         try:
             waas.get("/v1/applicants", params={"limit": "1"})
-            return [types.TextContent(type="text", text="WAAS_API: ok")]
+            host = waas.api_host.replace("https://", "").replace("http://", "")
+            return [types.TextContent(type="text", text=f"WAAS_API: ok ({host})")]
         except requests.exceptions.HTTPError as e:
+            host = waas.api_host.replace("https://", "").replace("http://", "")
             if e.response is not None and e.response.status_code == 401:
-                return [types.TextContent(type="text", text="WAAS_API: expired — re-authorize")]
-            return [types.TextContent(type="text", text=f"WAAS_API: error ({e})")]
+                return [types.TextContent(type="text", text=f"WAAS_API: expired — re-authorize ({host})")]
+            return [types.TextContent(type="text", text=f"WAAS_API: error ({e}) ({host})")]
         except Exception as e:
             return [types.TextContent(type="text", text=f"WAAS_API: error ({e})")]
 
@@ -325,6 +381,9 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.T
         short_id = args.pop("short_id", None)
         endpoint = endpoint_template.format(short_id=short_id) if short_id else endpoint_template
 
+        # Extract client-side params before sending to API
+        compact = args.pop("compact", False)
+
         # For batch lookup, short_ids goes as query param
         if name == "candidate_batch":
             short_ids = args.pop("short_ids", "")
@@ -338,6 +397,10 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.T
             response = waas.put(endpoint, data=args if args else None)
         else:
             return [types.TextContent(type="text", text=f"Unsupported method: {method}")]
+
+        # Apply compact transformation for applicant_list
+        if compact and name == "applicant_list":
+            response = _compact_response(response)
 
         result = json.dumps(response, indent=2)
 
