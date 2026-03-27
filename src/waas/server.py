@@ -10,6 +10,14 @@ from mcp.server import Server, NotificationOptions
 from mcp.server.models import InitializationOptions
 import mcp.server.stdio
 
+from .auth import (
+    load_credentials,
+    save_credentials,
+    is_expired,
+    refresh_access_token,
+    perform_auth_flow,
+)
+
 
 class WaasClient:
     """Handles WAAS API operations using OAuth2 Bearer tokens."""
@@ -21,19 +29,51 @@ class WaasClient:
         self.client_id: str = ""
         self.client_secret: str = ""
         self.token_host: str = ""
+        self.host_header: str = ""
 
     def connect(self) -> bool:
         try:
             self.api_host = os.getenv("WAAS_API_HOST", "https://api.ycombinator.com")
             self.host_header = os.getenv("WAAS_API_HOST_HEADER", "")
-            self.access_token = os.getenv("WAAS_ACCESS_TOKEN", "")
-            self.refresh_token = os.getenv("WAAS_REFRESH_TOKEN", "")
             self.client_id = os.getenv("WAAS_CLIENT_ID", "")
             self.client_secret = os.getenv("WAAS_CLIENT_SECRET", "")
             self.token_host = os.getenv("WAAS_TOKEN_HOST", self.api_host.replace("api.", "account."))
 
-            if not self.access_token:
-                raise ValueError("WAAS_ACCESS_TOKEN environment variable not set")
+            # Priority: env vars > stored credentials > browser auth flow
+            env_token = os.getenv("WAAS_ACCESS_TOKEN", "")
+            env_refresh = os.getenv("WAAS_REFRESH_TOKEN", "")
+
+            if env_token:
+                self.access_token = env_token
+                self.refresh_token = env_refresh
+                return True
+
+            stored = load_credentials()
+            if stored:
+                self.access_token = stored.get("access_token", "")
+                self.refresh_token = stored.get("refresh_token", "")
+                self.client_id = self.client_id or stored.get("client_id", "")
+
+                if is_expired(stored):
+                    print("Stored token expired, refreshing...", flush=True)
+                    if self._try_refresh():
+                        return True
+                    print("Refresh failed. Re-authenticating...", flush=True)
+                else:
+                    return True
+
+            if not self.client_id:
+                raise ValueError(
+                    "No credentials found. Set WAAS_CLIENT_ID and run the server to authenticate, "
+                    "or set WAAS_ACCESS_TOKEN directly."
+                )
+
+            tokens = perform_auth_flow(self.token_host, self.client_id)
+            self.access_token = tokens["access_token"]
+            self.refresh_token = tokens.get("refresh_token", "")
+            # Save client_id alongside tokens for future refresh
+            tokens["client_id"] = self.client_id
+            save_credentials(tokens)
             return True
         except Exception as e:
             print(f"WAAS connection failed: {str(e)}", flush=True)
@@ -52,20 +92,15 @@ class WaasClient:
         if not self.refresh_token or not self.client_id:
             return False
         try:
-            resp = requests.post(
-                f"{self.token_host}/oauth/token",
-                data={
-                    "grant_type": "refresh_token",
-                    "refresh_token": self.refresh_token,
-                    "client_id": self.client_id,
-                    "client_secret": self.client_secret,
-                },
+            data = refresh_access_token(
+                self.token_host, self.client_id, self.refresh_token, self.client_secret
             )
-            resp.raise_for_status()
-            data = resp.json()
             self.access_token = data["access_token"]
             if data.get("refresh_token"):
                 self.refresh_token = data["refresh_token"]
+            # Persist refreshed tokens
+            data["client_id"] = self.client_id
+            save_credentials(data)
             return True
         except Exception:
             return False

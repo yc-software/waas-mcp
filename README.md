@@ -11,61 +11,31 @@ Go to [account.ycombinator.com/oauth/applications/new](https://account.ycombinat
 | Field | Value |
 |-------|-------|
 | **Name** | Whatever you want (e.g. `My Recruiting Bot`) |
-| **Redirect URI** | `urn:ietf:wg:oauth:2.0:oob` |
+| **Redirect URI** | `http://localhost:19877/callback` |
 | **Confidential** | **Unchecked** (important — non-confidential clients work with the token exchange; confidential ones don't due to secret hashing) |
 | **Scopes** | `candidates:read candidates:manage` |
-| **Grant flows** | `Authorization code` (check `Client credentials` too if you want) |
+| **Grant flows** | `Authorization code` |
 
 Submit. Copy the **UID** from the confirmation page.
 
-### Step 2: Authorize
-
-Open this URL in your browser (replace `CLIENT_ID` with your UID):
-
-```
-https://account.ycombinator.com/oauth/authorize?client_id=CLIENT_ID&redirect_uri=urn:ietf:wg:oauth:2.0:oob&response_type=code&scope=candidates:read%20candidates:manage
-```
-
-Click **Authorize**. Copy the authorization code shown on screen.
-
-### Step 3: Exchange for Token
+### Step 2: Install & Register
 
 ```bash
-curl -X POST https://account.ycombinator.com/oauth/token \
-  -d "grant_type=authorization_code" \
-  -d "code=AUTH_CODE" \
-  -d "client_id=CLIENT_ID" \
-  -d "redirect_uri=urn:ietf:wg:oauth:2.0:oob"
-```
-
-No `client_secret` needed (non-confidential client). Returns:
-
-```json
-{
-  "access_token": "...",
-  "token_type": "Bearer",
-  "expires_in": 86400,
-  "refresh_token": "...",
-  "scope": "candidates:read candidates:manage"
-}
-
-```
-
-### Step 4: Install & Register
-
-```bash
-# Install the MCP server
-uv tool install --from /path/to/mcp-yc-waas mcp-yc-waas
-
-# Register with Claude Code (production)
+# Register with Claude Code — just the client ID
 claude mcp add waas \
-  -e WAAS_ACCESS_TOKEN=your_access_token \
-  -e WAAS_REFRESH_TOKEN=your_refresh_token \
   -e WAAS_CLIENT_ID=your_client_id \
   -- uvx --from /path/to/mcp-yc-waas waas
 ```
 
-Restart Claude Code. The MCP server auto-refreshes expired tokens using the refresh token.
+### Step 3: Authenticate
+
+Restart Claude Code. On first launch, the MCP server will:
+
+1. Open your browser to the YC authorization page
+2. You click **Authorize**
+3. Tokens are saved to `~/.yc/waas-credentials.json` (auto-refreshed on expiry)
+
+That's it. No manual token copying.
 
 ### Step 5: Verify
 
@@ -79,13 +49,15 @@ WAAS_API: ok (api.ycombinator.com)
 
 | Env var | Required | Default | Description |
 |---------|----------|---------|-------------|
-| `WAAS_ACCESS_TOKEN` | Yes | — | OAuth2 access token |
-| `WAAS_REFRESH_TOKEN` | No | — | OAuth2 refresh token (for auto-refresh) |
-| `WAAS_CLIENT_ID` | No | — | OAuth2 client ID (needed for refresh) |
+| `WAAS_CLIENT_ID` | Yes | — | OAuth2 client ID (from your OAuth app's UID) |
+| `WAAS_ACCESS_TOKEN` | No | — | OAuth2 access token (overrides stored credentials) |
+| `WAAS_REFRESH_TOKEN` | No | — | OAuth2 refresh token (overrides stored credentials) |
 | `WAAS_CLIENT_SECRET` | No | — | OAuth2 client secret (only for confidential apps) |
 | `WAAS_API_HOST` | No | `https://api.ycombinator.com` | API host |
 | `WAAS_API_HOST_HEADER` | No | — | Custom Host header (for local dev routing) |
 | `WAAS_TOKEN_HOST` | No | derived from API host | Token endpoint host (for refresh) |
+
+Credentials are stored in `~/.yc/waas-credentials.json` and auto-refreshed. Env vars take priority over stored credentials.
 
 ### Switching environments
 
