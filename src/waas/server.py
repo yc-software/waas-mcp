@@ -15,8 +15,8 @@ from .auth import (
     save_credentials,
     is_expired,
     refresh_access_token,
-    perform_auth_flow,
 )
+from .config import get_client_id, get_token_host, get_api_host, get_host_header
 
 
 class WaasClient:
@@ -30,22 +30,24 @@ class WaasClient:
         self.client_secret: str = ""
         self.token_host: str = ""
         self.host_header: str = ""
+        self.authenticated: bool = False
 
     def connect(self) -> bool:
         try:
-            self.api_host = os.getenv("WAAS_API_HOST", "https://api.ycombinator.com")
-            self.host_header = os.getenv("WAAS_API_HOST_HEADER", "")
-            self.client_id = os.getenv("WAAS_CLIENT_ID", "")
+            self.api_host = get_api_host()
+            self.host_header = get_host_header()
+            self.client_id = get_client_id()
             self.client_secret = os.getenv("WAAS_CLIENT_SECRET", "")
-            self.token_host = os.getenv("WAAS_TOKEN_HOST", self.api_host.replace("api.", "account."))
+            self.token_host = get_token_host()
 
-            # Priority: env vars > stored credentials > browser auth flow
+            # Priority: env vars > stored credentials
             env_token = os.getenv("WAAS_ACCESS_TOKEN", "")
             env_refresh = os.getenv("WAAS_REFRESH_TOKEN", "")
 
             if env_token:
                 self.access_token = env_token
                 self.refresh_token = env_refresh
+                self.authenticated = True
                 return True
 
             stored = load_credentials()
@@ -57,24 +59,16 @@ class WaasClient:
                 if is_expired(stored):
                     print("Stored token expired, refreshing...", flush=True)
                     if self._try_refresh():
+                        self.authenticated = True
                         return True
-                    print("Refresh failed. Re-authenticating...", flush=True)
+                    print("Refresh failed. Run 'waas login' to re-authenticate.", flush=True)
+                    return False
                 else:
+                    self.authenticated = True
                     return True
 
-            if not self.client_id:
-                raise ValueError(
-                    "No credentials found. Set WAAS_CLIENT_ID and run the server to authenticate, "
-                    "or set WAAS_ACCESS_TOKEN directly."
-                )
-
-            tokens = perform_auth_flow(self.token_host, self.client_id)
-            self.access_token = tokens["access_token"]
-            self.refresh_token = tokens.get("refresh_token", "")
-            # Save client_id alongside tokens for future refresh
-            tokens["client_id"] = self.client_id
-            save_credentials(tokens)
-            return True
+            print("Not authenticated. Run 'waas login' to get started.", flush=True)
+            return False
         except Exception as e:
             print(f"WAAS connection failed: {str(e)}", flush=True)
             return False
@@ -390,8 +384,12 @@ async def handle_list_tools() -> list[types.Tool]:
 
 @server.call_tool()
 async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextContent]:
+    NOT_AUTHENTICATED_MSG = "Not authenticated. Run 'waas login' in your terminal to get started."
+
     # Health check
     if name == "health_check":
+        if not waas.authenticated:
+            return [types.TextContent(type="text", text=f"WAAS_API: {NOT_AUTHENTICATED_MSG}")]
         try:
             waas.get("/v1/applicants", params={"limit": "1"})
             host = waas.api_host.replace("https://", "").replace("http://", "")
@@ -399,10 +397,13 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.T
         except requests.exceptions.HTTPError as e:
             host = waas.api_host.replace("https://", "").replace("http://", "")
             if e.response is not None and e.response.status_code == 401:
-                return [types.TextContent(type="text", text=f"WAAS_API: expired — re-authorize ({host})")]
+                return [types.TextContent(type="text", text=f"WAAS_API: expired — run 'waas login' to re-authenticate ({host})")]
             return [types.TextContent(type="text", text=f"WAAS_API: error ({e}) ({host})")]
         except Exception as e:
             return [types.TextContent(type="text", text=f"WAAS_API: error ({e})")]
+
+    if not waas.authenticated:
+        return [types.TextContent(type="text", text=NOT_AUTHENTICATED_MSG)]
 
     route = TOOL_ROUTES.get(name)
     if not route:

@@ -2,85 +2,53 @@
 
 MCP server for the YC Work at a Startup (WAAS) API. Lets Claude Code list applicants, view candidate profiles, send messages, update pipeline state, and manage notes — all from the command line.
 
-## Setup (Production)
+## Setup
 
-### Step 1: Create an OAuth Application
-
-Go to [account.ycombinator.com/oauth/applications/new](https://account.ycombinator.com/oauth/applications/new) and fill in:
-
-| Field | Value |
-|-------|-------|
-| **Name** | Whatever you want (e.g. `My Recruiting Bot`) |
-| **Redirect URI** | `http://localhost:19877/callback` |
-| **Confidential** | **Unchecked** (important — non-confidential clients work with the token exchange; confidential ones don't due to secret hashing) |
-| **Scopes** | `candidates:read candidates:manage` |
-| **Grant flows** | `Authorization code` |
-
-Submit. Copy the **UID** from the confirmation page.
-
-### Step 2: Install & Register
+### Step 1: Install & Register
 
 ```bash
-# Register with Claude Code — just the client ID
-claude mcp add waas \
-  -e WAAS_CLIENT_ID=your_client_id \
-  -- uvx --from /path/to/mcp-yc-waas waas
+claude mcp add waas -- uvx --from /path/to/mcp-yc-waas waas
 ```
 
-### Step 3: Authenticate
+### Step 2: Authenticate
 
-Restart Claude Code. On first launch, the MCP server will:
+```bash
+waas login
+```
 
-1. Open your browser to the YC authorization page
-2. You click **Authorize**
-3. Tokens are saved to `~/.yc/waas-credentials.json` (auto-refreshed on expiry)
+Your browser opens to the YC authorization page. Click **Authorize** and you're done. Tokens are saved to `~/.yc/waas-credentials.json` and auto-refresh on expiry.
 
-That's it. No manual token copying.
+### Step 3: Verify
 
-### Step 5: Verify
-
-After restart, run `health_check` in Claude Code. You should see:
+Restart Claude Code, then run `health_check`. You should see:
 
 ```
 WAAS_API: ok (api.ycombinator.com)
 ```
 
+### CLI Commands
+
+```bash
+waas login    # Authenticate (opens browser)
+waas logout   # Clear stored credentials
+waas status   # Check token status
+```
+
 ## Configuration
 
-| Env var | Required | Default | Description |
-|---------|----------|---------|-------------|
-| `WAAS_CLIENT_ID` | Yes | — | OAuth2 client ID (from your OAuth app's UID) |
-| `WAAS_ACCESS_TOKEN` | No | — | OAuth2 access token (overrides stored credentials) |
-| `WAAS_REFRESH_TOKEN` | No | — | OAuth2 refresh token (overrides stored credentials) |
-| `WAAS_CLIENT_SECRET` | No | — | OAuth2 client secret (only for confidential apps) |
-| `WAAS_API_HOST` | No | `https://api.ycombinator.com` | API host |
-| `WAAS_API_HOST_HEADER` | No | — | Custom Host header (for local dev routing) |
-| `WAAS_TOKEN_HOST` | No | derived from API host | Token endpoint host (for refresh) |
+All env vars are optional — the default setup requires no configuration beyond `waas login`.
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `WAAS_CLIENT_ID` | built-in | Override the OAuth2 client ID |
+| `WAAS_ACCESS_TOKEN` | — | OAuth2 access token (overrides stored credentials) |
+| `WAAS_REFRESH_TOKEN` | — | OAuth2 refresh token (overrides stored credentials) |
+| `WAAS_CLIENT_SECRET` | — | OAuth2 client secret (only for confidential apps) |
+| `WAAS_API_HOST` | `https://api.ycombinator.com` | API host |
+| `WAAS_API_HOST_HEADER` | — | Custom Host header (for local dev routing) |
+| `WAAS_TOKEN_HOST` | derived from API host | Token endpoint host (for refresh) |
 
 Credentials are stored in `~/.yc/waas-credentials.json` and auto-refreshed. Env vars take priority over stored credentials.
-
-### Switching environments
-
-**Production** (default — no host env vars needed):
-```bash
-WAAS_ACCESS_TOKEN=...
-WAAS_REFRESH_TOKEN=...
-WAAS_CLIENT_ID=...
-# WAAS_API_HOST defaults to https://api.ycombinator.com
-```
-
-**Local dev** (requires host overrides):
-```bash
-WAAS_API_HOST=http://bookface.yclocal.com
-WAAS_API_HOST_HEADER=public-api.yclocal.com:3002
-WAAS_TOKEN_HOST=http://account.yclocal.com
-```
-
-**How to tell which environment you're on:** Run `health_check` — it shows the host: `WAAS_API: ok (api.ycombinator.com)` vs `WAAS_API: ok (bookface.yclocal.com)`.
-
-### Where config lives
-
-`claude mcp add` stores config in `~/.claude.json` under `projects.<working-dir>.mcpServers.waas`. If you previously registered the MCP for a different environment (e.g. local dev), `claude mcp add` may create a duplicate entry at a different scope instead of overriding the project-scoped one. **Always check `~/.claude.json` directly** if the MCP seems to be hitting the wrong environment.
 
 ## Tools
 
@@ -172,26 +140,25 @@ uv tool install --force --from . mcp-yc-waas
 
 For testing against local bookface (`http://bookface.yclocal.com`):
 
-1. Create the OAuth app at `http://account.yclocal.com/oauth/applications/new` (same settings as production — non-confidential, `candidates:read candidates:manage`)
-2. Authorize at `http://account.yclocal.com/oauth/authorize?client_id=CLIENT_ID&redirect_uri=urn:ietf:wg:oauth:2.0:oob&response_type=code&scope=candidates:read%20candidates:manage`
-3. Exchange for token: `curl -X POST http://account.yclocal.com/oauth/token -d "grant_type=authorization_code" -d "code=AUTH_CODE" -d "client_id=CLIENT_ID" -d "redirect_uri=urn:ietf:wg:oauth:2.0:oob"`
-4. Register with host overrides:
+1. Create an OAuth app at `http://account.yclocal.com/oauth/applications/new` (non-confidential, redirect URI `http://localhost:19877/callback`, scopes `candidates:read candidates:manage`)
+2. Register with host overrides:
 ```bash
 claude mcp add waas \
-  -e WAAS_ACCESS_TOKEN=your_local_token \
-  -e WAAS_REFRESH_TOKEN=your_local_refresh_token \
   -e WAAS_CLIENT_ID=your_local_client_id \
   -e WAAS_API_HOST=http://bookface.yclocal.com \
   -e WAAS_API_HOST_HEADER=public-api.yclocal.com:3002 \
   -e WAAS_TOKEN_HOST=http://account.yclocal.com \
   -- uvx --from /path/to/mcp-yc-waas waas
 ```
+3. Run `waas login` — browser opens to local auth page
 
 ## Troubleshooting
 
-**"Client authentication failed"** — Make sure the OAuth app is set to **non-confidential**. Confidential apps hash secrets, making the token exchange fail.
+**"Not authenticated"** — Run `waas login` to authenticate via browser.
 
-**Token expired** — Access tokens expire after 24 hours. If you have a refresh token and client ID configured, the server auto-refreshes. Otherwise, re-run steps 2-3.
+**"Client authentication failed"** — The OAuth app must be **non-confidential**. Confidential apps hash secrets, making the PKCE token exchange fail.
+
+**Token expired** — Tokens auto-refresh. If refresh fails, run `waas login` to re-authenticate.
 
 **Wrong environment** — Run `health_check` to see which host you're hitting. Check `~/.claude.json` for duplicate MCP entries if it's pointing to the wrong environment.
 
