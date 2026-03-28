@@ -15,7 +15,18 @@ from typing import Optional
 CREDENTIALS_DIR = ".yc"
 CREDENTIALS_FILE = "waas-credentials.json"
 CALLBACK_PORT = 19877
-OAUTH_SCOPES = ["candidates:read", "candidates:manage"]
+OAUTH_SCOPES = [
+    "waas:candidates:read",
+    "waas:candidates:manage",
+    "waas:applications:read",
+    "waas:applications:manage",
+    "waas:messages:read",
+    "waas:messages:manage",
+    "waas:stages:read",
+    "waas:stages:manage",
+    "waas:notes:read",
+    "waas:notes:manage",
+]
 
 
 def _credentials_path() -> Path:
