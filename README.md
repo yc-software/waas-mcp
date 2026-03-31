@@ -125,7 +125,7 @@ Once registered, you can use natural language in Claude Code:
 
 ```bash
 # Clone
-git clone git@github.com:ryankicks/waas-mcp.git
+git clone git@github.com:yc-software/waas-mcp.git
 cd waas-mcp
 
 # Install locally
