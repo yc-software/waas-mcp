@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "mcp-yc-waas"
+name = "waas-mcp"
 version = "0.1.0"
 description = "MCP server for YC Work at a Startup (WAAS) API"
 requires-python = ">=3.10"

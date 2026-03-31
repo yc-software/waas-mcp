@@ -1,4 +1,4 @@
-# mcp-yc-waas
+# waas-mcp
 
 MCP server for the YC Work at a Startup (WAAS) API. Lets Claude Code list applicants, view candidate profiles, send messages, update pipeline state, and manage notes — all from the command line.
 
@@ -7,7 +7,7 @@ MCP server for the YC Work at a Startup (WAAS) API. Lets Claude Code list applic
 ### Step 1: Install & Register
 
 ```bash
-claude mcp add waas -- uvx --from /path/to/mcp-yc-waas waas
+claude mcp add waas -- uvx --from /path/to/waas-mcp waas
 ```
 
 ### Step 2: Authenticate
@@ -125,14 +125,14 @@ Once registered, you can use natural language in Claude Code:
 
 ```bash
 # Clone
-git clone git@github.com:ryankicks/mcp-yc-waas.git
-cd mcp-yc-waas
+git clone git@github.com:ryankicks/waas-mcp.git
+cd waas-mcp
 
 # Install locally
-uv tool install --from . mcp-yc-waas
+uv tool install --from . waas-mcp
 
 # After making changes, reinstall
-uv tool install --force --from . mcp-yc-waas
+uv tool install --force --from . waas-mcp
 # Then restart Claude Code
 ```
 
@@ -148,7 +148,7 @@ claude mcp add waas \
   -e WAAS_API_HOST=http://bookface.yclocal.com \
   -e WAAS_API_HOST_HEADER=public-api.yclocal.com:3002 \
   -e WAAS_TOKEN_HOST=http://account.yclocal.com \
-  -- uvx --from /path/to/mcp-yc-waas waas
+  -- uvx --from /path/to/waas-mcp waas
 ```
 3. Run `waas login` — browser opens to local auth page
 
