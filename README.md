@@ -7,7 +7,14 @@ MCP server for the YC Work at a Startup (WAAS) API. Lets Claude Code list applic
 ### Step 1: Install & Register
 
 ```bash
-claude mcp add waas -- uvx --from /path/to/waas-mcp waas
+claude mcp add waas -- uvx --from git+https://github.com/yc-software/waas-mcp waas
+```
+
+Or install locally with uv:
+
+```bash
+uv tool install git+https://github.com/yc-software/waas-mcp
+claude mcp add waas -- waas
 ```
 
 ### Step 2: Authenticate
