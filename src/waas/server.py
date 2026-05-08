@@ -113,6 +113,20 @@ class WaasClient:
         if resp.status_code == 401 and self._try_refresh():
             resp = requests.post(url, headers=self._headers(), json=data or {})
         resp.raise_for_status()
+        if resp.status_code == 204 or not resp.content:
+            return {"status": "ok"}
+        return resp.json()
+
+    def post_multipart(self, endpoint: str, fields: dict, files: Optional[dict] = None) -> dict:
+        url = f"{self.api_host}{endpoint}"
+        headers = {"Authorization": f"Bearer {self.access_token}"}
+        if self.host_header:
+            headers["Host"] = self.host_header
+        resp = requests.post(url, headers=headers, data=fields, files=files or {})
+        if resp.status_code == 401 and self._try_refresh():
+            headers["Authorization"] = f"Bearer {self.access_token}"
+            resp = requests.post(url, headers=headers, data=fields, files=files or {})
+        resp.raise_for_status()
         return resp.json()
 
     def put(self, endpoint: str, data: Optional[dict] = None) -> dict:
@@ -121,6 +135,8 @@ class WaasClient:
         if resp.status_code == 401 and self._try_refresh():
             resp = requests.put(url, headers=self._headers(), json=data or {})
         resp.raise_for_status()
+        if resp.status_code == 204 or not resp.content:
+            return {"status": "ok"}
         return resp.json()
 
 
@@ -301,6 +317,72 @@ TOOLS = [
         },
     ),
 
+    # ── Pipeline ──────────────────────────────────────────────────────
+    types.Tool(
+        name="job_list",
+        description=(
+            "List your company's jobs on WAAS with their pipeline stages. "
+            "Returns job id, title, state, and the ordered pipeline stages for each job."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
+    types.Tool(
+        name="pipeline_show",
+        description=(
+            "Show the full pipeline board for a job — all stages with their candidates. "
+            "Each stage lists candidates with short_id, name, entered_at, state, and needs_response flag."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "job_id": {"type": "integer", "description": "Job ID (from job_list)"},
+            },
+            "required": ["job_id"],
+        },
+    ),
+    types.Tool(
+        name="pipeline_move",
+        description=(
+            "Move one or more candidates to a pipeline stage for a job. "
+            "This is a WRITE operation. Use job_list to discover valid stage names."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "job_id": {"type": "integer", "description": "Job ID (from job_list)"},
+                "short_ids": {"type": "array", "items": {"type": "string"}, "description": "Candidate short_ids to move."},
+                "stage_name": {"type": "string", "description": "Target pipeline stage name (e.g. 'Screen', 'Interview'). Use job_list to see valid stage names."},
+            },
+            "required": ["job_id", "short_ids", "stage_name"],
+        },
+    ),
+
+    # ── Candidate Upload ──────────────────────────────────────────────
+    types.Tool(
+        name="candidate_create",
+        description=(
+            "Add a new candidate to a job's pipeline with an optional resume. "
+            "The candidate will only be visible to your company. "
+            "This is a WRITE operation."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "first_name": {"type": "string", "description": "Candidate's first name."},
+                "last_name": {"type": "string", "description": "Candidate's last name."},
+                "email": {"type": "string", "description": "Candidate's email address."},
+                "job_id": {"type": "integer", "description": "Job ID to add the candidate to (from job_list)."},
+                "linkedin": {"type": "string", "description": "LinkedIn profile URL (optional)."},
+                "stage_name": {"type": "string", "description": "Pipeline stage name (optional, defaults to first stage). Use job_list to see valid stage names."},
+                "resume_path": {"type": "string", "description": "Local file path to a resume (PDF/DOC/DOCX) to upload (optional)."},
+            },
+            "required": ["first_name", "last_name", "email", "job_id"],
+        },
+    ),
+
     # ── Health Check ───────────────────────────────────────────────────
     types.Tool(
         name="health_check",
@@ -323,10 +405,14 @@ TOOL_ROUTES = {
     "candidate_message_send":   ("POST", "/v1/candidates/{short_id}/messages"),
     "candidate_notes_list":     ("GET",  "/v1/candidates/{short_id}/notes"),
     "candidate_note_create":    ("POST", "/v1/candidates/{short_id}/notes"),
+    "job_list":                 ("GET",  "/v1/jobs"),
+    "pipeline_show":            ("GET",  "/v1/jobs/{job_id}/pipeline"),
+    "pipeline_move":            ("POST", "/v1/jobs/{job_id}/pipeline/move"),
 }
 
 WRITE_TOOLS = {
     "candidate_status_update", "candidate_message_send", "candidate_note_create",
+    "pipeline_move", "candidate_create",
 }
 
 
@@ -405,6 +491,47 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.T
     if not waas.authenticated:
         return [types.TextContent(type="text", text=NOT_AUTHENTICATED_MSG)]
 
+    # candidate_create — custom handler for multipart file upload
+    if name == "candidate_create":
+        try:
+            args = dict(arguments) if arguments else {}
+            fields = {
+                "first_name": args["first_name"],
+                "last_name": args["last_name"],
+                "email": args["email"],
+                "job_id": str(args["job_id"]),
+            }
+            if args.get("linkedin"):
+                fields["linkedin"] = args["linkedin"]
+            if args.get("stage_name"):
+                fields["stage_name"] = args["stage_name"]
+
+            files = None
+            resume_path = args.get("resume_path")
+            if resume_path:
+                import mimetypes
+                from pathlib import Path
+                path = Path(resume_path).expanduser()
+                if not path.exists():
+                    return [types.TextContent(type="text", text=f"Resume file not found: {resume_path}")]
+                content_type = mimetypes.guess_type(str(path))[0] or "application/pdf"
+                files = {"resume": (path.name, open(path, "rb"), content_type)}
+
+            response = waas.post_multipart("/v1/prospects", fields=fields, files=files)
+            result = json.dumps(response, indent=2)
+            result += "\n\n⚠️ This was a WRITE operation — candidate has been created."
+            return [types.TextContent(type="text", text=result)]
+        except requests.exceptions.HTTPError as e:
+            error_body = ""
+            if e.response is not None:
+                try:
+                    error_body = e.response.text
+                except Exception:
+                    pass
+            return [types.TextContent(type="text", text=f"WAAS API error: {e}\n{error_body}")]
+        except Exception as e:
+            return [types.TextContent(type="text", text=f"Error creating candidate: {e}")]
+
     route = TOOL_ROUTES.get(name)
     if not route:
         return [types.TextContent(type="text", text=f"Unknown tool: {name}")]
@@ -412,10 +539,16 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.T
     method, endpoint_template = route
 
     try:
-        # Extract path params (short_id)
+        # Extract path params (short_id, job_id)
         args = dict(arguments) if arguments else {}
         short_id = args.pop("short_id", None)
-        endpoint = endpoint_template.format(short_id=short_id) if short_id else endpoint_template
+        job_id = args.pop("job_id", None)
+        format_kwargs = {}
+        if short_id:
+            format_kwargs["short_id"] = short_id
+        if job_id:
+            format_kwargs["job_id"] = job_id
+        endpoint = endpoint_template.format(**format_kwargs) if format_kwargs else endpoint_template
 
         # Extract client-side params before sending to API
         compact = args.pop("compact", False)

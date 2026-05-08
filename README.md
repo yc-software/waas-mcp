@@ -1,6 +1,6 @@
 # waas-mcp
 
-MCP server for the YC Work at a Startup (WAAS) API. Lets Claude Code list applicants, view candidate profiles, send messages, update pipeline state, and manage notes — all from the command line.
+MCP server for the YC Work at a Startup (WAAS) API. Lets Claude Code list applicants, view candidate profiles, manage pipeline stages, upload candidates with resumes, send messages, and manage notes — all from the command line.
 
 ## Setup
 
@@ -110,6 +110,22 @@ The compact transformation is client-side only — the WAAS API returns the same
 | `candidate_notes_list` | List internal notes on a candidate. |
 | `candidate_note_create` | Add an internal note. |
 
+### Pipeline
+
+| Tool | Description |
+|------|-------------|
+| `job_list` | List your company's jobs with their pipeline stages (id, title, state, stage names). |
+| `pipeline_show` | Full pipeline board for a job — all stages with candidates (short_id, name, entered_at, state, needs_response). Includes an "Applied" virtual stage for candidates who applied but haven't been placed in a stage yet. |
+| `pipeline_move` | Move one or more candidates to a pipeline stage. Works for all candidates. |
+
+### Adding Candidates
+
+| Tool | Description |
+|------|-------------|
+| `candidate_create` | Add a new candidate to a job's pipeline with an optional resume (PDF/DOC/DOCX from a local file path). The candidate will only be visible to your company. Must specify a real pipeline stage (e.g. "In Review") — "Applied" is a virtual view, not a stage. |
+
+**Note:** `candidate_create` requires the `waas:candidates:manage` scope. If you get a 403, re-authenticate with `waas login` or update your token to include this scope.
+
 ### Health
 
 | Tool | Description |
@@ -124,6 +140,9 @@ Once registered, you can use natural language in Claude Code:
 - "Just PE applicants" → `applicant_list(job_id: 41302, compact: true)`
 - "Who applied this week?" → `applicant_list(since: "2026-03-17T00:00:00Z", compact: true)`
 - "Tell me about this candidate" → `candidate_show(short_id: "KhNCmzEZ")`
+- "Show me the pipeline" → `job_list()` then `pipeline_show(job_id: 41302)`
+- "Move Jane to Screen" → `pipeline_move(job_id: 41302, short_ids: ["abc123"], stage_name: "Screen")`
+- "Add this person to In Review" → `candidate_create(first_name: "Jane", last_name: "Doe", email: "jane@example.com", job_id: 41302, resume_path: "/tmp/jane.pdf")`
 - "Archive candidates 1-5" → loops `candidate_status_update(short_id, state: "archived", archive_reason: "not_qualified")`
 - "Message this candidate" → `candidate_message_send(short_id: "KhNCmzEZ", message: "Hi! Thanks for applying...")`
 - "Check if WAAS is connected" → `health_check()`
@@ -172,3 +191,20 @@ claude mcp add waas \
 **Local dev 404** — The API routes require `Host: public-api.yclocal.com:3002`. Set `WAAS_API_HOST_HEADER` in your env config.
 
 **Rate limiting** — The WAAS API rate-limits write operations. When batch-archiving candidates, space out calls or retry on 429 responses.
+
+## Changelog
+
+### v0.2.0
+
+**New tools:**
+
+- `job_list` — list your company's jobs with pipeline stages
+- `pipeline_show` — full pipeline board view for a job, including a virtual "Applied" stage for candidates not yet placed in a stage
+- `pipeline_move` — move candidates between pipeline stages (works for all candidates)
+- `candidate_create` — add a new candidate to a job's pipeline with optional resume upload. Candidates added this way are only visible to your company.
+
+**New OAuth scope required:** `waas:candidates:manage` — needed for `candidate_create`. Run `waas login` to re-authenticate and pick up the new scope, or add it to your existing token.
+
+**Fixes:**
+
+- API responses with empty bodies (204 No Content) no longer cause JSON parse errors
