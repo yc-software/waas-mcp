@@ -118,6 +118,33 @@ The compact transformation is client-side only — the WAAS API returns the same
 | `pipeline_show` | Full pipeline board for a job — all stages with candidates (short_id, name, entered_at, state, needs_response). Includes an "Applied" virtual stage for candidates who applied but haven't been placed in a stage yet. |
 | `pipeline_move` | Move one or more candidates to a pipeline stage. Works for all candidates. |
 
+### Job postings (create / edit)
+
+| Tool | Description |
+|------|-------------|
+| `job_show` | Full editable detail for one job posting by id (role, subtypes, comp, equity, skills, locations, …). Read before editing. |
+| `job_create` | Create a job posting. Requires `waas:jobs:manage`. Defaults to `state: hidden` (draft); set `state: visible` to publish. |
+| `job_update` | Edit a posting — partial update, send only the fields you want to change. Requires `waas:jobs:manage`. |
+
+**Required to save a posting** (enforced by the API): `title`, `description`, `role`, the role's subtype, `job_type`, `remote`, `us_work_authorization_required`, seniority, and a location unless remote.
+
+**Field vocabularies** — send the key; these enums are also encoded in the tool input schemas:
+
+- **`role`**: `eng` · `design` · `product` · `science` · `sales` · `marketing` · `support` · `operations` · `recruiting` · `finance` · `legal`
+- **Subtype (array, required ≥1) — only for these four roles**; the other seven take none:
+  - `role: eng` → **`eng_type`**: android, be, data_sci, devops, embedded, eng_mgmt, fe, fs, ios, ml, qa, robotics, hw, electrical, mechanical, bio, chemical
+  - `role: design` → **`design_type`**: web, mobile, product, ui_ux, user_research, brand_graphic, illustration, animation, hardware, ar_vr, design_mgmt
+  - `role: science` → **`science_type`**: bio, biotech, chem, genetics, health, immuno, lab, onc, pharma, process, research
+  - `role: recruiting` → **`recruiting_type`**: sourcer, recruiter, coordinator, lead, operations, fullcycle, manager
+- **`job_type`**: `fulltime` · `cofounder` · `intern` · `contract`
+- **Seniority**: `min_experience` (integer years) for non-interns, OR `min_school_year` (`any`/`freshman`/`sophomore`/`junior`/`senior`) for `job_type: intern`
+- **`remote`**: `yes` remote ok · `no` in-person (**requires `locations`**) · `only` remote only
+- **`us_work_authorization_required`**: boolean — `true` = must already be US-authorized (no sponsorship), `false` = sponsorship OK
+- **`pay_period`**: `year` · `month` · `hour` — **`currency`**: `USD` · `CAD` · `INR` · `EUR` · `GBP`
+- **`state`**: `hidden` draft · `visible` published — **`skills`**: free-text names, resolved per-role, unmatched dropped — **`equity_min`/`equity_max`**: percent 0–100 — **`time_to_hire`**: days
+
+**Note:** `job_create`/`job_update` require the `waas:jobs:manage` scope. If you get a 403, run `waas login` to re-authenticate and pick up the scope.
+
 ### Adding Candidates
 
 | Tool | Description |
@@ -193,6 +220,14 @@ claude mcp add waas \
 **Rate limiting** — The WAAS API rate-limits write operations. When batch-archiving candidates, space out calls or retry on 429 responses.
 
 ## Changelog
+
+### v0.4.0
+
+**New tools:** `job_show`, `job_create`, `job_update` — read, create, and edit WAAS job postings.
+
+**New OAuth scope required:** `waas:jobs:manage` — needed for `job_create`/`job_update`. Run `waas login` to re-authenticate and pick up the new scope.
+
+Every field's valid values (role, subtypes, job_type, remote, pay_period, currency, state, …) are encoded as enums in the tool input schemas; the conditional rules (subtype-depends-on-role, min_experience vs min_school_year, remote='no' requires a location) are in the tool descriptions. See "Job postings (create / edit)" above.
 
 ### v0.3.0
 
