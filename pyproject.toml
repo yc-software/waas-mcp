@@ -8,7 +8,9 @@ version = "0.1.0"
 description = "MCP server for YC Work at a Startup (WAAS) API"
 requires-python = ">=3.10"
 dependencies = [
-    "mcp",
+    # mcp 2.0 removed the low-level Server decorator API (@server.list_tools())
+    # that server.py is built on. Pin below 2 until the server is ported.
+    "mcp>=1.27,<2",
     "requests",
     "python-dotenv",
 ]
