@@ -26,6 +26,7 @@ OAUTH_SCOPES = [
     "waas:stages:manage",
     "waas:notes:read",
     "waas:notes:manage",
+    "waas:jobs:manage",
 ]
 
 

@@ -154,6 +154,37 @@ if not waas.connect():
 # ---------------------------------------------------------------------------
 # Tool definitions
 # ---------------------------------------------------------------------------
+
+# Shared editable job-posting fields for job_create / job_update. The enum values
+# mirror the app constants (JobsProfile::ROLES / *_TYPES / SCHOOL_YEAR_MINIMUMS and
+# JobsCompanyJob::PAY_PERIODS / CURRENCIES / STATES) as of 2026-08-22. If they drift,
+# re-dump: rails runner "puts JobsProfile::ROLES.to_json".
+JOB_FIELD_PROPERTIES = {
+    "title": {"type": "string", "description": "Job title. Must not contain an email address."},
+    "description": {"type": "string", "description": "Job description. Must not contain an email address."},
+    "state": {"type": "string", "enum": ["hidden", "visible"], "description": "hidden = draft (create default); visible = published to the public board."},
+    "role": {"type": "string", "enum": ["eng", "design", "product", "science", "sales", "marketing", "support", "operations", "recruiting", "finance", "legal"]},
+    "job_type": {"type": "string", "enum": ["fulltime", "cofounder", "intern", "contract"]},
+    "eng_type": {"type": "array", "items": {"type": "string", "enum": ["android", "be", "data_sci", "devops", "embedded", "eng_mgmt", "fe", "fs", "ios", "ml", "qa", "robotics", "hw", "electrical", "mechanical", "bio", "chemical"]}, "description": "Engineering subtype(s). Required when role='eng'."},
+    "design_type": {"type": "array", "items": {"type": "string", "enum": ["web", "mobile", "product", "ui_ux", "user_research", "brand_graphic", "illustration", "animation", "hardware", "ar_vr", "design_mgmt"]}, "description": "Design subtype(s). Required when role='design'."},
+    "science_type": {"type": "array", "items": {"type": "string", "enum": ["bio", "biotech", "chem", "genetics", "health", "immuno", "lab", "onc", "pharma", "process", "research"]}, "description": "Science subtype(s). Required when role='science'."},
+    "recruiting_type": {"type": "array", "items": {"type": "string", "enum": ["sourcer", "recruiter", "coordinator", "lead", "operations", "fullcycle", "manager"]}, "description": "Recruiting subtype(s). Required when role='recruiting'."},
+    "min_experience": {"type": "integer", "description": "Minimum years of experience. Non-intern roles (UI offers 0, 1, 3, 6, 11; any non-negative integer works)."},
+    "min_school_year": {"type": "string", "enum": ["any", "freshman", "sophomore", "junior", "senior"], "description": "Minimum school year. Interns only (job_type='intern')."},
+    "remote": {"type": "string", "enum": ["yes", "no", "only"], "description": "yes = remote allowed; no = in-person (REQUIRES locations); only = remote only."},
+    "us_work_authorization_required": {"type": "boolean", "description": "true = candidate must already be authorized to work in the US (no sponsorship); false = not required / sponsorship OK."},
+    "locations": {"type": "array", "items": {"type": "string"}, "description": "Free-text office locations, e.g. 'San Francisco, CA, USA'. Required when remote='no'."},
+    "salary_min": {"type": "integer", "description": "Minimum salary (integer, in `currency`)."},
+    "salary_max": {"type": "integer", "description": "Maximum salary."},
+    "equity_min": {"type": "number", "description": "Minimum equity as a percent, 0-100 (e.g. 0.5 means 0.5%)."},
+    "equity_max": {"type": "number", "description": "Maximum equity percent."},
+    "pay_period": {"type": "string", "enum": ["year", "month", "hour"], "description": "Salary period. Default 'year'."},
+    "currency": {"type": "string", "enum": ["USD", "CAD", "INR", "EUR", "GBP"]},
+    "interview_process": {"type": "string", "description": "Free-text description of the interview process."},
+    "time_to_hire": {"type": "integer", "description": "Typical days from first contact to offer."},
+    "skills": {"type": "array", "items": {"type": "string"}, "description": "Free-text skill names, resolved per-role and case-insensitively; names that don't match a skill for the role are dropped."},
+}
+
 TOOLS = [
     # ── Applicants (company-scoped) ────────────────────────────────────
     types.Tool(
@@ -356,6 +387,57 @@ TOOLS = [
         },
     ),
 
+    # ── Job postings (create / edit) ──────────────────────────────────
+    types.Tool(
+        name="job_show",
+        description=(
+            "Get one WAAS job posting by id — full editable detail (title, description, role, "
+            "role_type, job_type, remote, us_work_authorization_required, comp, equity, skills, "
+            "locations, etc.). Read this before job_update to see current values."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {"job_id": {"type": "integer", "description": "Job ID (from job_list)."}},
+            "required": ["job_id"],
+        },
+    ),
+    types.Tool(
+        name="job_create",
+        description=(
+            "Create a WAAS job posting. WRITE operation. Requires the waas:jobs:manage scope.\n"
+            "Defaults to state='hidden' (draft) — set state='visible' to publish to the public board.\n"
+            "A posting must be COMPLETE to save: title, description, role, the role's subtype, job_type, "
+            "remote, us_work_authorization_required, seniority, and (for in-person roles) a location.\n"
+            "- SUBTYPE depends on role: eng -> eng_type, design -> design_type, science -> science_type, "
+            "recruiting -> recruiting_type (each required, >=1 value). The other roles "
+            "(product, sales, marketing, support, operations, finance, legal) take NO subtype.\n"
+            "- SENIORITY: min_experience (integer years) for non-intern job_types, OR min_school_year "
+            "for job_type='intern'.\n"
+            "- remote='no' (in-person) REQUIRES >=1 locations.\n"
+            "- skills are free-text names resolved per-role; unmatched names are silently dropped — "
+            "check the echoed 'skills' in the response to confirm what resolved."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": JOB_FIELD_PROPERTIES,
+            "required": ["title", "description", "role", "job_type", "remote", "us_work_authorization_required"],
+        },
+    ),
+    types.Tool(
+        name="job_update",
+        description=(
+            "Edit an existing WAAS job posting. WRITE operation. Requires the waas:jobs:manage scope. "
+            "Partial update — send only the fields you want to change. Same field rules as job_create. "
+            "Set state='visible' to publish or 'hidden' to unpublish. Changing role re-scopes skills to "
+            "the new role. Read job_show first to see current values."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {"job_id": {"type": "integer", "description": "Job ID to edit (from job_list)."}, **JOB_FIELD_PROPERTIES},
+            "required": ["job_id"],
+        },
+    ),
+
     # ── Candidate Upload ──────────────────────────────────────────────
     types.Tool(
         name="candidate_create",
@@ -402,13 +484,16 @@ TOOL_ROUTES = {
     "candidate_notes_list":     ("GET",  "/v1/candidates/{short_id}/notes"),
     "candidate_note_create":    ("POST", "/v1/candidates/{short_id}/notes"),
     "job_list":                 ("GET",  "/v1/jobs"),
+    "job_show":                 ("GET",  "/v1/jobs/{job_id}"),
+    "job_create":               ("POST", "/v1/jobs"),
+    "job_update":               ("PUT",  "/v1/jobs/{job_id}"),
     "pipeline_show":            ("GET",  "/v1/jobs/{job_id}/pipeline"),
     "pipeline_move":            ("POST", "/v1/jobs/{job_id}/pipeline/move"),
 }
 
 WRITE_TOOLS = {
     "candidate_status_update", "candidate_message_send", "candidate_note_create",
-    "pipeline_move", "candidate_create",
+    "pipeline_move", "candidate_create", "job_create", "job_update",
 }
 
 
