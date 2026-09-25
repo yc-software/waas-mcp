@@ -339,6 +339,12 @@ TOOLS = [
             "properties": {
                 "short_id": {"type": "string", "description": "Candidate short_id."},
                 "note": {"type": "string", "description": "Note text."},
+                "score": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 5,
+                    "description": "Optional rating attached to the note (WAAS UI uses 1-5).",
+                },
             },
             "required": ["short_id", "note"],
         },
