@@ -139,6 +139,16 @@ class WaasClient:
             return {"status": "ok"}
         return resp.json()
 
+    def delete(self, endpoint: str, data: Optional[dict] = None) -> dict:
+        url = f"{self.api_host}{endpoint}"
+        resp = requests.delete(url, headers=self._headers(), json=data or None)
+        if resp.status_code == 401 and self._try_refresh():
+            resp = requests.delete(url, headers=self._headers(), json=data or None)
+        resp.raise_for_status()
+        if resp.status_code == 204 or not resp.content:
+            return {"status": "deleted"}
+        return resp.json()
+
 
 # ---------------------------------------------------------------------------
 # Server setup
@@ -349,6 +359,43 @@ TOOLS = [
             "required": ["short_id", "note"],
         },
     ),
+    types.Tool(
+        name="candidate_note_update",
+        description=(
+            "Edit an existing internal note on a candidate. This is a WRITE operation. "
+            "Send only the fields you want to change."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "short_id": {"type": "string", "description": "Candidate short_id."},
+                "note_id": {"type": "integer", "description": "Note id, from candidate_notes_list."},
+                "note": {"type": "string", "description": "Replacement note text."},
+                "score": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 5,
+                    "description": "Replacement rating (WAAS UI uses 1-5).",
+                },
+            },
+            "required": ["short_id", "note_id"],
+        },
+    ),
+    types.Tool(
+        name="candidate_note_delete",
+        description=(
+            "Permanently delete an internal note on a candidate. This is a WRITE operation "
+            "and cannot be undone."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "short_id": {"type": "string", "description": "Candidate short_id."},
+                "note_id": {"type": "integer", "description": "Note id, from candidate_notes_list."},
+            },
+            "required": ["short_id", "note_id"],
+        },
+    ),
 
     # ── Pipeline ──────────────────────────────────────────────────────
     types.Tool(
@@ -489,6 +536,8 @@ TOOL_ROUTES = {
     "candidate_message_send":   ("POST", "/v1/candidates/{short_id}/messages"),
     "candidate_notes_list":     ("GET",  "/v1/candidates/{short_id}/notes"),
     "candidate_note_create":    ("POST", "/v1/candidates/{short_id}/notes"),
+    "candidate_note_update":    ("PUT",  "/v1/candidates/{short_id}/notes/{note_id}"),
+    "candidate_note_delete":    ("DELETE", "/v1/candidates/{short_id}/notes/{note_id}"),
     "job_list":                 ("GET",  "/v1/jobs"),
     "job_show":                 ("GET",  "/v1/jobs/{job_id}"),
     "job_create":               ("POST", "/v1/jobs"),
@@ -499,6 +548,7 @@ TOOL_ROUTES = {
 
 WRITE_TOOLS = {
     "candidate_status_update", "candidate_message_send", "candidate_note_create",
+    "candidate_note_update", "candidate_note_delete",
     "pipeline_move", "candidate_create", "job_create", "job_update",
 }
 
@@ -626,15 +676,18 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.T
     method, endpoint_template = route
 
     try:
-        # Extract path params (short_id, job_id)
+        # Extract path params (short_id, job_id, note_id)
         args = dict(arguments) if arguments else {}
         short_id = args.pop("short_id", None)
         job_id = args.pop("job_id", None)
+        note_id = args.pop("note_id", None)
         format_kwargs = {}
         if short_id:
             format_kwargs["short_id"] = short_id
         if job_id:
             format_kwargs["job_id"] = job_id
+        if note_id is not None:
+            format_kwargs["note_id"] = note_id
         endpoint = endpoint_template.format(**format_kwargs) if format_kwargs else endpoint_template
 
         # Extract client-side params before sending to API
@@ -651,6 +704,8 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[types.T
             response = waas.post(endpoint, data=args if args else None)
         elif method == "PUT":
             response = waas.put(endpoint, data=args if args else None)
+        elif method == "DELETE":
+            response = waas.delete(endpoint, data=args if args else None)
         else:
             return [types.TextContent(type="text", text=f"Unsupported method: {method}")]
 
