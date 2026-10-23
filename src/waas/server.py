@@ -5,6 +5,10 @@ from typing import Any, Optional
 from dotenv import load_dotenv
 import requests
 
+# (connect_timeout, read_timeout) applied to all outbound HTTP calls so an
+# unresponsive upstream cannot block a request indefinitely.
+DEFAULT_TIMEOUT = (10, 30)
+
 import mcp.types as types
 from mcp.server import Server, NotificationOptions
 from mcp.server.models import InitializationOptions
@@ -101,17 +105,17 @@ class WaasClient:
 
     def get(self, endpoint: str, params: Optional[dict] = None) -> dict:
         url = f"{self.api_host}{endpoint}"
-        resp = requests.get(url, headers=self._headers(), params=params)
+        resp = requests.get(url, headers=self._headers(), params=params, timeout=DEFAULT_TIMEOUT)
         if resp.status_code == 401 and self._try_refresh():
-            resp = requests.get(url, headers=self._headers(), params=params)
+            resp = requests.get(url, headers=self._headers(), params=params, timeout=DEFAULT_TIMEOUT)
         resp.raise_for_status()
         return resp.json()
 
     def post(self, endpoint: str, data: Optional[dict] = None) -> dict:
         url = f"{self.api_host}{endpoint}"
-        resp = requests.post(url, headers=self._headers(), json=data or {})
+        resp = requests.post(url, headers=self._headers(), json=data or {}, timeout=DEFAULT_TIMEOUT)
         if resp.status_code == 401 and self._try_refresh():
-            resp = requests.post(url, headers=self._headers(), json=data or {})
+            resp = requests.post(url, headers=self._headers(), json=data or {}, timeout=DEFAULT_TIMEOUT)
         resp.raise_for_status()
         if resp.status_code == 204 or not resp.content:
             return {"status": "ok"}
@@ -122,18 +126,18 @@ class WaasClient:
         headers = {"Authorization": f"Bearer {self.access_token}"}
         if self.host_header:
             headers["Host"] = self.host_header
-        resp = requests.post(url, headers=headers, data=fields, files=files or {})
+        resp = requests.post(url, headers=headers, data=fields, files=files or {}, timeout=DEFAULT_TIMEOUT)
         if resp.status_code == 401 and self._try_refresh():
             headers["Authorization"] = f"Bearer {self.access_token}"
-            resp = requests.post(url, headers=headers, data=fields, files=files or {})
+            resp = requests.post(url, headers=headers, data=fields, files=files or {}, timeout=DEFAULT_TIMEOUT)
         resp.raise_for_status()
         return resp.json()
 
     def put(self, endpoint: str, data: Optional[dict] = None) -> dict:
         url = f"{self.api_host}{endpoint}"
-        resp = requests.put(url, headers=self._headers(), json=data or {})
+        resp = requests.put(url, headers=self._headers(), json=data or {}, timeout=DEFAULT_TIMEOUT)
         if resp.status_code == 401 and self._try_refresh():
-            resp = requests.put(url, headers=self._headers(), json=data or {})
+            resp = requests.put(url, headers=self._headers(), json=data or {}, timeout=DEFAULT_TIMEOUT)
         resp.raise_for_status()
         if resp.status_code == 204 or not resp.content:
             return {"status": "ok"}
